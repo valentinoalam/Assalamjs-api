@@ -1,0 +1,255 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// generator nexusPrisma {
+//    provider = "nexus-prisma"
+// }
+
+model Surah {
+  no            Int    @id
+  nama          String
+  nama_panjang  String
+  nama_latin    String
+  arti          String
+  translation   String?
+  tempat_turun  String
+  tafsir        String?
+  jumlah_ayat   Int
+  audio_url     String
+  ayahs         Ayah[]
+}
+
+model Ayah {
+  id            Int    @id
+  nomor         Int
+  arab          String
+  latin         String
+  terjemahan    String
+  catatan_kaki  String?
+  isAyahSajadah Boolean
+  hal           Int
+  juz           Int
+  audio_url     String?
+  surahNo       Int
+  surah         Surah  @relation(fields: [surahNo], references: [no])
+}
+
+model AsmaulHusna {
+  id          Int  @id @default(autoincrement())
+  arab        String
+  indo        String
+  latin       String
+  explanation String
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  thumbnails  AsmaulHusnaThumbnail[]
+}
+
+model AsmaulHusnaThumbnail {
+  id                  String        @id @default(uuid()) @db.Char(36)
+  asmaulHusna_id      Int           @unique
+  asmaulHusna         AsmaulHusna   @relation(fields: [asmaulHusna_id], references: [id], onDelete: Cascade)
+  thumbnail_id        String   @db.Char(36) @unique
+  thumbnails          Thumbnail @relation(fields: [thumbnail_id], references: [id], onDelete: Cascade)
+  @@unique([asmaulHusna_id, thumbnail_id])
+}
+
+model Doa {
+  id       String  @id @default(uuid()) @db.Char(36)
+  category_id String
+  judul    String
+  doa      String
+  latin    String
+  arti     String
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  kategori Category  @relation(fields: [category_id], references: [id])
+}
+
+model User {
+  id               String  @id @default(uuid()) @db.Char(36)
+  name             String
+  email            String    @unique
+  hashed_password  String
+  hashed_api_token String?
+  status           Int       @default(0)
+  role_id          Int       @default(0)
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  questions        Question[]
+  exams            Exam[]
+}
+
+model Category {
+  id          String  @id @default(uuid()) @db.Char(36)
+  name        String?
+  description String?
+  type        String?
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  questions   Question[]
+
+  Doa Doa[]
+}
+
+model Exam {
+  id          String  @id @default(uuid()) @db.Char(36)
+  name        String?
+  description String?
+  level       Int?
+  duration    Int?
+  date        DateTime?
+  time        DateTime?
+  status      Int?
+  user_id      String      @db.Char(36)
+  author      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  questions   ExamQuestion[]
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+}
+
+model Question {
+  id          String  @id @default(uuid()) @db.Char(36)
+  question    String
+  type        String?
+  options     Json?
+  answer      String?
+  explanation String?
+  difficulty  Difficulty
+  tags        String?
+  status      Int?
+  category_id  String
+  category    Category  @relation(fields: [category_id], references: [id])
+  user_id      String
+  user        User      @relation(fields: [user_id], references: [id])
+  exams       ExamQuestion[]
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  Quiz Quiz[]
+}
+
+model ExamQuestion {
+  exam_id     String
+  exam       Exam     @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+  question_id String
+  question   Question @relation(fields: [question_id], references: [id], onDelete: Cascade)
+
+  @@id([exam_id, question_id])
+}
+
+model Quiz {
+  id         String  @id @default(uuid()) @db.Char(36)
+  video_id    String   @unique @db.Char(36)
+  video      Video    @relation(fields: [video_id], references: [id])
+  question   Question[]
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+}
+
+model Note {
+  id          String  @id @default(uuid()) @db.Char(36)
+  content     String
+  user_id     String  @db.Char(36)
+  video_id    String  @db.Char(36)
+  video       Video    @relation(fields: [video_id], references: [id])
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+}
+
+model Playlist {
+  id          String  @id @default(uuid()) @db.Char(36)
+  youtube_id   String?      @unique                  // Playlist ID from YouTube
+  title       String
+  description String
+  channel_id       String                               // ID of the channel
+  channelTitle    String                               // Channel name
+  publishedAt     DateTime                             // When the playlist was published
+  localizedTitle  String                               // Localized title
+  localizedDesc   String?                              // Localized description (nullable)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  video Video[]
+  PlaylistThumbnail PlaylistThumbnail[]
+}
+
+model PlaylistThumbnail {
+  id         String  @id @default(uuid()) @db.Char(36)
+  playlist_id String   @db.Char(36)
+  playlist   Playlist @relation(fields: [playlist_id], references: [id], onDelete: Cascade)
+  thumbnail_id  String   @db.Char(36) @unique
+  thumbnails Thumbnail @relation(fields: [thumbnail_id], references: [id], onDelete: Cascade)
+  @@unique([playlist_id, thumbnail_id])
+}
+
+model Thumbnail {
+  id         String  @id @default(uuid()) @db.Char(36)
+  url        String  
+  width      Int
+  high       Int
+  sizeCategory  ThumbnailCategory
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  playlistThumbnail PlaylistThumbnail?
+  videoThumbnail VideoThumbnail?
+
+  AsmaulHusnaThumbnail AsmaulHusnaThumbnail[]
+}
+
+model VideoThumbnail {
+  id            String  @id @default(uuid()) @db.Char(36)
+  video_id      String   @db.Char(36) @unique
+  video         Video @relation(fields: [video_id], references: [id], onDelete: Cascade)
+  thumbnail_id  String   @db.Char(36) @unique
+  thumbnails Thumbnail @relation(fields: [thumbnail_id], references: [id], onDelete: Cascade)
+  @@unique([video_id, thumbnail_id])
+}
+
+model Video {
+  id                    String  @id @default(uuid()) @db.Char(36)
+  youtube_id            String      @unique                // Video ID from YouTube
+  playlist_id           String?   @db.Char(36)
+  playlist              Playlist? @relation(fields: [playlist_id], references: [id])
+  publishedAt           DateTime
+  title                 String
+  description           String?
+  channel_id             String                               // ID of the channel
+  channelTitle          String                               // Channel name
+  playListPosition      Int?
+  thumbnails            VideoThumbnail[]
+  url                   String?
+  materyDownloadUrl     String?
+  live_broadcast_content Int
+  quizzes     Quiz?
+  notes       Note[]
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+}
+
+enum ThumbnailCategory {
+  default
+  medium
+  high
+  standard
+  maxres
+}

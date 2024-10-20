@@ -1,0 +1,379 @@
+"use strict"
+const fs = require("fs");
+const path = require("path");
+const utils = require("./utils")(); // Normaly no need to function call however i want utils to object type instead of function
+const {Num, Frequencies} = require("./types")
+
+//Default policies like settings applies inheritly unless child has a different policy for asked policy
+const policies = {
+    // Whether basmalas without ayat number will be omitted or counted in calculations
+    includeBasmalas : true,
+    utils: utils,
+}
+
+// Does not effects objects created before change
+module.exports.setPolicy = (policyName, value) => {
+    if(policies[policyName] != undefined && typeof value == typeof policies[policyName]){
+        policies[policyName] = value
+    }else{
+        throw new Error("Policy doesn't exists or wrong type for value!")
+    }
+}
+
+class policyManager{
+    constructor(){
+        this.setPolicies = {}
+    }
+    setPolicy(name, value){
+        if(policies[name]) this.setPolicies[name] = value
+        else throw new Error("No such policy!")
+    }
+    getPolicy(name){
+        if(this.setPolicies[name] != undefined) return this.setPolicies[name];
+        if(this.parent) return this.parent.getPolicy(name);
+        if(policies[name] != undefined) return policies[name];
+        throw new Error("No such policy!")
+    }
+    getAllPolicies(){
+        let objsPolicies
+        if(this.parent){
+            objsPolicies = this.parent.getAllPolicies()
+        }else{
+            objsPolicies = { ...policies}
+        }
+        // First get a copy of parents policies then override the ones that exists also in itself
+        Object.keys(this.setPolicies).forEach( name => {
+            objsPolicies[name] = this.setPolicies[name]
+        })
+        return objsPolicies
+    }
+}
+
+class Container extends policyManager{
+    constructor(){
+        super()
+    }
+    count(){
+        let total = 0;
+        this.forEach(child => { total += child.count()})
+        return total;
+    }
+    abjad(){
+        let total = 0
+        this.forEach(node => total += node.abjad())
+        return new Num(total)
+    }
+    letterCount(){
+        let val = 0
+        this.forEach(node => val += node.letterCount())
+        return new Num(val)
+    }
+    wordCount(){
+        let val = 0
+        this.forEach(node => val += node.wordCount())
+        return new Num(val)
+    }
+    search(text, arr = []){
+        this.forEach( verse => {
+            if(verse.search(text) != -1) arr.push(verse)
+        })
+        return arr
+    }
+    letterFrequencies(instance){
+        if(!instance) instance = new Frequencies()
+        this.forEach(node => node.letterFrequencies(instance))
+        return instance
+    }
+}
+
+// For search matches, not implemented yet :(
+class Match{
+    constructor(verse, count){
+        this.verse = verse
+        this.count = count
+    }
+}
+
+class VerseRange extends Container{
+    constructor(mushaf, startSurah, startVerse, endSurah, endVerse){
+        super()
+        this.mushaf = mushaf
+        this.startSurah = startSurah
+        this.endSurah = endSurah
+        this.startVerse = startVerse
+        this.endVerse = endVerse
+    }
+
+    count(){
+        return this.forEach()
+    }
+
+    forEach(func){
+        let includeBasmalas = this.getPolicy("includeBasmalas")
+        let curSurah = this.startSurah
+        let curVerse = this.startVerse
+        let count = 0
+        let surah = this.mushaf.getSurah(curSurah)
+        while(curSurah < this.endSurah || (curSurah == this.endSurah && curVerse <= this.endVerse)){
+            if(!surah) surah = this.mushaf.getSurah(curSurah)
+            let verse = surah.getVerse(curVerse)
+            if(curVerse != 0 || verse && includeBasmalas){
+                func && func(verse,curSurah, curVerse)
+                count++
+            }
+            curVerse++
+            if(curVerse > surah.lastChild){
+                curSurah++
+                curVerse = 0
+                surah = false
+            }
+        }
+        return count
+    }
+}
+
+class Verse{
+    constructor(surah, no, verse){
+        this.surah = surah
+        this.no = no
+        this.verse = verse
+    }
+    get utils(){
+        return this.surah.getPolicy("utils")
+    }
+    text(){
+        return this.verse
+    }
+    abjad(){
+        return new Num(this.utils.calcAbjad(this.verse))
+    }
+    letterCount(){
+        return new Num(this.utils.countLetters(this.verse))
+    }
+    wordCount(){
+        return new Num(this.utils.countWords(this.verse))
+    }
+    search(text){
+        return this.verse.search(text)
+    }
+    letters(){
+        return this.utils.extractLetters(this.verse)
+    }
+    letterFrequencies(instance){
+        return this.utils.letterFrequencies(this.verse, instance)
+    }
+    count(){ // Internally this is not needed
+        return 1;
+    }
+}
+
+class Surah extends Container{
+    constructor(mushaf, no, verses){
+        super()
+        this.mushaf = mushaf
+        this.parent = this.mushaf
+        this.no = no
+        this.verses = verses
+        for(let i = 0; i < this.verses.length; i++){
+            if(typeof this.verses[i] == 'string'){
+                this.verses[i] = new Verse(this, i, this.verses[i]);
+            }
+        }
+        this.lastChild = this.verses.length-1;
+    }
+    count(){
+        if(this.verses[0] && this.getPolicy("includeBasmalas")){
+            return this.verses.length;
+        }else{
+            return this.verses.length-1;
+        }
+    }
+    getVerse(no){
+        if(no > this.count) throw new Error("Out of verse range!");
+        return this.verses[no]
+    }
+    // func will called with arguments: Verse, surahNo, verseNo
+    forEach(func, firstVerse = 0, lastVerse){
+        if(lastVerse == undefined) lastVerse = this.verses.length-1;
+        if(firstVerse < 0) throw new Error("first verse number has to be greater than zero!")
+        let includeBasmalas = this.getPolicy("includeBasmalas")
+        if(firstVerse == 0 && ( !includeBasmalas || this.no == 1 || this.no == 9)) firstVerse = 1;
+        for(let i = firstVerse; i <= lastVerse; i++){
+            func(this.verses[i], this.no, i)
+        }
+    }
+
+}
+
+class Mushaf extends Container{
+    constructor(name, verses){
+        super()
+        this.name = name
+        this.surahs = []
+        verses.forEach( (verseArr,i) => {
+            this.surahs.push(new Surah(this, i+1, verseArr));
+        })
+    }
+    
+    count(){
+        let total = 0;
+        this.forEach( surah => {total += surah.count()})
+        return total;
+    }
+
+    getSurah(no){
+        if(no < 1 || no > 114) throw new Error("Surah not found!");
+        return this.surahs[no-1]
+    }
+    
+    forEach(func){
+        this.surahs.forEach( (surah, i) => func(surah, i))
+    }
+
+    select(selector){
+        if(typeof selector == 'string' && /^\d+$/.test(selector)) selector = parseInt(selector);
+        if(typeof selector == 'number'){
+            if(selector <= 0 || selector > 114) throw new Error("Out of the verse range!")
+            return this.surahs[selector-1];
+        }
+        if(typeof selector != 'string') throw new Error("Unexpected selector type! It has to be number or string!")
+        let match = selector.match(/^(?<startSurah>\d+)(?::(?<startVerse>\d+))?(?:(?<hypen>-)(?:(?<endSurah>\d+)(?::(?<endVerse>\d+))?)?)?$/)
+        if(!match) throw new Error("Ill-formated selector! It should be like 23:25-46:10 or 23-46:10 or 23-46 ...")
+        let groups = match.groups
+        let startSurah = groups.startSurah != undefined ? parseInt(groups.startSurah) : false
+        let startVerse = groups.startVerse != undefined ? parseInt(groups.startVerse) : false
+        let endSurah = groups.endSurah != undefined ? parseInt(groups.endSurah) : false
+        let endVerse = groups.endVerse != undefined ? parseInt(groups.endVerse) : false
+        let hypen = groups.hypen ? true : false
+        // hypen without endSurah means go until the end
+        if(hypen && !endSurah) endSurah == 114;
+        // Check for surah boundaries
+        if(startSurah < 1 || startSurah > 114 || (endSurah && (endSurah < 1 || endSurah > 114))) 
+            throw new Error("Out of range of surahs!");
+        if(startVerse === false) startVerse = 0;
+        if( (startSurah == 1 || startSurah == 9) && startVerse === 0) startVerse = 1;
+        if(endSurah){
+            if( (endSurah == 1 || endSurah == 9) && endVerse === 0){
+                endSurah--;
+                endVerse = false;
+            }
+            if(endSurah < startSurah) throw new Error("Starting Surah no cannot be greater than ending!");
+            
+            if(endVerse === false) endVerse = this.surahs[endSurah-1].lastChild;
+            
+            if(startSurah == endSurah){
+                if(startVerse > endVerse) throw new Error("Ending verse number has to be greater than starting verse in case where ending and starting surahs are same!")
+                if(startVerse == endVerse){
+                    endSurah = false
+                    endVerse = false
+                }
+            }
+            
+        }
+        if(startVerse && startVerse > this.surahs[startSurah-1].lastChild) throw new Error("Out of verse range");
+        if(endVerse && endVerse > this.surahs[endSurah-1].lastChild) throw new Error("Out of verse range");
+        //console.log(startSurah,endSurah,startVerse,endVerse)
+        if(!endSurah) return this.surahs[startSurah-1].getVerse(startVerse)
+        return new VerseRange(this, startSurah, startVerse, endSurah, endVerse)
+    }
+}
+
+class Mushafs extends policyManager{
+    constructor(){
+        super()
+        this.mushafs = []
+    }
+    add(mushaf){
+        if(mushaf instanceof Mushaf){
+            if(this.pick(mushaf.name) == false){
+                mushaf.parent = this
+                this.mushafs.push(mushaf);
+            }else{
+                throw new Error("A mushaf with same name exists!");
+            }
+        }else
+            throw new Error("Paramater mushaf should be instance of Mushaf")
+    }
+
+    forEach(func){
+        this.mushafs.forEach(func)
+    }
+    
+    pick(selector){
+        if(typeof selector == 'number'){
+            if(selector < 0 || selector > this.mushafs.length) return false;
+            return this.mushafs[selector];
+        }else if(typeof selector == 'string'){
+            let mushaf = this.mushafs.find(mushaf => mushaf.name == selector)
+            return mushaf ? mushaf : false;
+        }else if(Array.isArray(selector)){
+            let mushafs = false
+            selector.forEach( s => {
+                if(typeof s == "string" || typeof s == "number"){
+                    let mushaf = this.pick(s);
+                    if(mushaf){
+                        if(mushafs){
+                            if(mushafs.pick(mushaf.name) == false) mushafs.add(mushaf);
+                        }else{
+                            mushafs = new Mushafs();
+                            mushafs.add(mushaf);
+                        }
+                    }
+                }
+            })
+            return mushafs;
+        }else throw new Error("Unexpected Type of selector!");
+    }
+}
+
+
+/////////////// Loaders ///////////////
+const tanzil = {}
+module.exports.tanzil = tanzil
+
+tanzil.loadFile = function(filePath){
+    let name = path.basename(filePath).replace(/\.[^.]+$/,'').replace(/^quran/,'tanzil')
+    let diyanet = name.startsWith('diyanet')
+    let data = fs.readFileSync(filePath, "utf8");
+    let lines = data.split('\n')
+    let verses = []
+    for(let i=0; i<114; i++) verses.push([]);
+    let basmala
+    lines.forEach( line => {
+        let splitVerse = line.split("|")
+        if(splitVerse.length == 3){
+            let surahNo = splitVerse[0]
+            let verseNo = splitVerse[1]
+            let verse = splitVerse[2].replace(/\s+$/,'')
+            //console.log({verse})
+            if(verseNo == 1){
+                if(surahNo == 1 || surahNo == 9){
+                    verses[surahNo-1].push(false)
+                    verses[surahNo-1].push(verse)
+                    if(surahNo == 1) basmala = verse
+                }else{
+                    if(diyanet){
+                        verses[surahNo-1].push(basmala)
+                        verses[surahNo-1].push(verse)
+                    }else{
+                        let split = verse.split(/(?<=^(?:[^ ]+ ){3}[^ ]+) /u)
+                        if(split.length != 2) throw new Error("Couldn't split basmala!");
+                        verses[surahNo-1].push(split[0])
+                        verses[surahNo-1].push(split[1])
+                    }
+                }
+            }else if(1 || surahNo != 9 || verses[surahNo-1].length < 128){
+                verses[surahNo-1].push(verse)
+            }   
+        }
+    })
+    return new Mushaf(name, verses);
+}
+
+tanzil.loadDir = function(dir){
+    let mushafs = new Mushafs()
+    fs.readdirSync(dir).forEach( file => {
+        mushafs.add(this.loadFile(path.join(dir, file)))
+    })
+    return mushafs
+}

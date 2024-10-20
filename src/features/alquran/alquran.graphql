@@ -1,0 +1,24 @@
+type Alquran {
+  # Example field (placeholder)
+  exampleField: Int
+}
+
+input CreateAlquranInput {
+  # Example field (placeholder)
+  exampleField: Int
+}
+
+input UpdateAlquranInput {
+  id: Int!
+}
+
+type Query {
+  alquran: [Alquran]!
+  alquran(id: Int!): Alquran
+}
+
+type Mutation {
+  createAlquran(createAlquranInput: CreateAlquranInput!): Alquran!
+  updateAlquran(updateAlquranInput: UpdateAlquranInput!): Alquran!
+  removeAlquran(id: Int!): Alquran
+}
